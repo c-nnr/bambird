@@ -570,21 +570,21 @@ def multicpu_extract_rois(
                 # reset index
                 df_rois_sorted.reset_index(inplace=True)
         
-        else:
-            # reset the index
-            try:
-                df_rois.reset_index('filename_ts', inplace = True)
-            except:
-                pass  
-            
-            # remove from df_data the audio files that were already segmented
-            mask = df_rois['filename'].isin(df_data['filename'].unique().tolist())
-            df_rois_sorted = df_rois[mask]
-            csv_fullfilename = save_path / save_csv_filename
-            
-            if verbose:
-                print("No audio file needs to be segmented")
-                print(">>> EXTRACTION PROCESS ABORTED <<<")
+            else:
+                # reset the index
+                try:
+                    df_rois.reset_index('filename_ts', inplace = True)
+                except:
+                    pass  
+                
+                # remove from df_data the audio files that were already segmented
+                mask = df_rois['filename'].isin(df_data['filename'].unique().tolist())
+                df_rois_sorted = df_rois[mask]
+                csv_fullfilename = save_path / save_csv_filename
+                
+                if verbose:
+                    print("No audio file needs to be segmented")
+                    print(">>> EXTRACTION PROCESS ABORTED <<<")
             
     # The directory already exists
     #-------------------------------      
