@@ -456,45 +456,86 @@ def multicpu_extract_rois(
         # Extract ROIs using multicpu  
         #-----------------------------
         # test if the dataframe contains files to segment
-        if len(df_data[~mask])>0 :
-            
-            if verbose :
-                print('Composition of the dataset : ')
-                print('   -number of files : %2.0f' % len(df_data[~mask]))
-                print('   -number of categories : %2.0f' % len(df_data[~mask]['categories'].unique()))
-                print('   -unique categories : {}'.format(df_data[~mask]['categories'].unique()))
-        
-            # Number of CPU used for the calculation. By default, set to all available
-            # CPUs
+        files_to_process = df_data[~mask]
+
+        # Test if the dataframe contains files to segment
+        if not files_to_process.empty: # More idiomatic check than len(...) > 0
+
+            if verbose:
+                print('Composition of the dataset to process: ')
+                print(f'   - number of files : {len(files_to_process)}')
+                categories = files_to_process['categories'].unique()
+                print(f'   - number of categories : {len(categories)}')
+                print(f'   - unique categories : {categories}')
+
+            # Number of CPU used for the calculation.
             if nb_cpu is None:
                 nb_cpu = os.cpu_count()
-                
-            # define a new function with fixed parameters to give to the multicpu pool 
-            #-------------------------------------------------------------------------        
-            
-            # Print the characteristics of the function used to segment the files
-            if verbose :
-                print(params['FUNC'])
-            
+            # Ensure at least 1 worker, adjust max_workers calculation
+            max_workers = max(1, nb_cpu - 1 if nb_cpu > 1 else 1)
+
+            if verbose:
+                print(f"Using {max_workers} worker(s) for parallel processing.")
+                # Assuming params['FUNC'] has a meaningful representation or name
+                try:
+                    func_name = params['FUNC'].__name__
+                except AttributeError:
+                    func_name = str(params['FUNC'])
+                print(f"Segmentation function: {func_name}")
+
+            # define a new function with fixed parameters to give to the multicpu pool
+            #-------------------------------------------------------------------------
             multicpu_func = partial(
                 single_file_extract_rois,
                 fun=params['FUNC'],
                 params=params,
                 save_path=save_path,
                 display=False,
-                verbose=False,
+                verbose=False, # Usually keep verbose=False for parallel workers
             )
-        
+
+            # List to hold the resulting dataframes from each process
+            results_list = []
+
             # Multicpu process
             #-------------------
-            with tqdm(total=len(df_data[~mask])) as pbar:
-                with futures.ProcessPoolExecutor(max_workers=nb_cpu-1) as pool:
-                    for df_rois_temp in pool.map(
-                        multicpu_func, df_data[~mask]["fullfilename"].to_list()
-                    ):
-                        pbar.update(1)
-                        df_rois = df_rois.append(df_rois_temp)
-            
+            print(f"Starting ROI extraction for {len(files_to_process)} files...")
+            with futures.ProcessPoolExecutor(max_workers=max_workers) as pool:
+                # pool.map returns an iterator. Wrap it with tqdm for progress.
+                # Collect results directly into a list.
+                results_list = list(tqdm(
+                    pool.map(multicpu_func, files_to_process["fullfilename"].to_list()),
+                    total=len(files_to_process),
+                    desc="Extracting ROIs"
+                ))
+
+            # Filter out potential None or empty results if your function might return them
+            valid_results = [df for df in results_list if isinstance(df, pd.DataFrame) and not df.empty]
+
+            # Concatenate all valid results *after* the loop
+            if valid_results:
+                print(f"Concatenating results from {len(valid_results)} files...")
+                # Concatenate the list of new DataFrames
+                new_rois_df = pd.concat(valid_results, ignore_index=True)
+
+                # Combine with the existing df_rois DataFrame
+                # Ensure df_rois exists and handles the case where it might be empty
+                if 'df_rois' in locals() and not df_rois.empty:
+                    df_rois = pd.concat([df_rois, new_rois_df], ignore_index=True)
+                else:
+                    # If df_rois was empty or didn't exist, the new results become df_rois
+                    df_rois = new_rois_df
+                print("Concatenation complete.")
+            else:
+                print("No valid ROIs data generated from processed files.")
+                # Ensure df_rois still exists if it's needed later, maybe as an empty DF
+                if 'df_rois' not in locals():
+                    df_rois = pd.DataFrame() # Or with specific columns if known
+
+        else:
+            if verbose:
+                print("No files to process based on the current mask.")
+
             # sort filename for each categories
             #---------------------------------
             df_rois_sorted = pd.DataFrame()
